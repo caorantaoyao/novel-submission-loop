@@ -1,0 +1,6 @@
+interface:
+  display_name: "小说循环投稿"
+  short_description: "七猫投稿，QQ Mail发送"
+  default_prompt: "Use $novel-submission-loop to continue the next editor submission package."
+policy:
+  allow_implicit_invocation: true
