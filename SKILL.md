@@ -1,6 +1,6 @@
 ---
 name: novel-submission-loop
-description: "Use when the user wants to run the fixed Qimao editor novel submission loop: use the fixed editor preference library, take the next editor from the queue, decide the submission type from that editor's preferences, search male-channel candidate books only on Qidian Chinese Network and female-channel candidate books only on Fanqie Novel, select an excellent but non-mega-hit target book, read its first five chapters, generate detailed chapter outlines, write first five chapters, create title/introduction/character names/chapter names, generate a Word document, prepare an email preview, send only through the QQ Mail plugin after explicit confirmation, record the submission, and move to the next editor."
+description: "Use when the user wants to run the fixed Qimao editor novel submission loop: use the fixed editor preference library, take the next editor from the queue, decide the submission type from that editor's preferences, search male-channel candidate books only on Qidian Chinese Network and female-channel candidate books only on Fanqie Novel, select an excellent but non-mega-hit target book, read its first five chapters, generate detailed chapter outlines, write first five chapters, create title/introduction/character names/chapter names, generate a Word document, prepare an email preview, send through the local qq-mail@personal plugin MCP server helper after explicit confirmation, record the submission, and move to the next editor."
 ---
 
 # Novel Submission Loop
@@ -38,6 +38,7 @@ Use this helper when possible:
 ```bash
 python3 .agents/skills/novel-submission-loop/scripts/editor_queue.py next
 python3 .agents/skills/novel-submission-loop/scripts/editor_queue.py advance --project "<project_slug>" --title "<book_title>" --docx "outputs/<project_slug>/<book_title>.docx" --status sent
+python3 .agents/skills/novel-submission-loop/scripts/send_qq_mail_submission.py --preview "outputs/<project_slug>/07_mail_preview.md" --confirm 确认发送
 ```
 
 ## Per-Submission Artifacts
@@ -69,10 +70,11 @@ outputs/<project_slug>/
 - Generate the Word document after the draft, title, synopsis, character names, and chapter names are finalized.
 - Use the document workflow available in the current Codex session for `.docx` creation and render/QA when available.
 - Prepare the email preview before any send attempt. Include recipient, subject, body, and attachment path.
-- Send email only through the QQ Mail plugin / `qq_mail` tool.
+- Send email only through `scripts/send_qq_mail_submission.py`, which loads the local `qq-mail@personal` plugin MCP server and calls its `send_email` handler.
 - Never send the email until the user explicitly confirms the exact preview.
 - Only after successful send, append the submission log and advance the cursor.
-- If the QQ Mail plugin / `qq_mail` tool is unavailable or cannot attach the Word file, leave status as `prepared` and do not advance the cursor unless the user instructs otherwise.
+- Do not wait for a `qq_mail` tool to appear in the current Codex tool list; this workflow normally sends by loading the installed local plugin server directly.
+- If `scripts/send_qq_mail_submission.py` cannot find the local `qq-mail@personal` plugin server, cannot load credentials, or cannot attach the Word file, leave status as `prepared` and do not advance the cursor unless the user instructs otherwise.
 
 ## Submission Word Rules
 
@@ -84,6 +86,9 @@ Apply these rules to the final `.docx` intended for the editor:
 - If a same-title `.docx` already exists, ask the user before overwriting or renaming. Do not silently add `1`, `v2`, timestamps, or queue numbers.
 - The submitted Word document must be a clean manuscript, not an operations report.
 - By default, the Word document should contain only the novel title and the five completed chapters with final chapter names.
+- Each submitted chapter should be 2,000-3,000 Chinese characters by default.
+- The five-chapter manuscript should total roughly 10,000-15,000 Chinese characters unless the user specifies otherwise.
+- If a chapter is below 1,800 Chinese characters, expand it before generating the Word document.
 - Keep synopsis, character names, title options, editor information, candidate evidence, target-book notes, and submission metadata in the Markdown artifacts or email preview, not inside the submitted Word document.
 - Do not include sections titled or equivalent to: `投稿信息`, `编辑信息`, `目标书`, `参考书`, `候选书`, `主要人物`, `人物设定`, `创作说明`, `AI说明`, `生成说明`, `细纲`, `节奏表`, `大纲`, or `备注`.
 - Do not mention `AI`, `Codex`, `ChatGPT`, prompts, model usage, automated generation, source-book analysis, or workflow steps anywhere in the submitted Word document.
@@ -124,12 +129,34 @@ Apply these rules whenever using Qidian or Fanqie:
 
 Apply these rules to the email preview and final send:
 
-- Use only the QQ Mail plugin / `qq_mail` tool for the final send.
-- Do not use Gmail, Lark Mail, system mail clients, browser-based manual sending, SMTP scripts outside the QQ Mail plugin, or any other email connector.
+- Use only `scripts/send_qq_mail_submission.py` for the final send. This helper sends through the installed local `qq-mail@personal` plugin MCP server.
+- Do not use Gmail, Lark Mail, system mail clients, browser-based manual sending, ad hoc SMTP scripts, or any other email connector.
 - The email attachment must be the final clean Word manuscript: `outputs/<project_slug>/<book_title>.docx`.
 - The email body must contain only the novel title and the novel synopsis.
 - Do not include greetings, editor names, self-introduction, submission notes, attachment explanations, contact details, thanks, signatures, workflow notes, source-book notes, or AI/model/tool references in the email body.
 - The email preview may show recipient, subject, and attachment path as preview metadata, but those fields must not be repeated inside the email body.
+
+## QQ Mail Send Path
+
+Use this deterministic send path when the user has confirmed with `确认发送`:
+
+1. Verify the preview and attachment exist.
+2. Run a dry parse first:
+
+```bash
+python3 .agents/skills/novel-submission-loop/scripts/send_qq_mail_submission.py --preview "outputs/<project_slug>/07_mail_preview.md" --dry-run
+```
+
+3. Send through the installed local `qq-mail@personal` plugin MCP server:
+
+```bash
+python3 .agents/skills/novel-submission-loop/scripts/send_qq_mail_submission.py --preview "outputs/<project_slug>/07_mail_preview.md" --confirm 确认发送
+```
+
+4. If the first send attempt fails with DNS, socket, or network sandbox errors, rerun the same command with escalated network permission. Do not switch mail providers.
+5. Only when the helper returns `sent: true`, run `editor_queue.py advance ... --status sent`.
+
+The helper reads `QQ_MAIL_ENV_FILE` from the environment, defaulting to `qq-mail-mcp/.env` in the repo. It uses the installed personal plugin cache path for `qq-mail@personal`; if the plugin path is missing, stop and report that the local QQ Mail plugin server is not installed or not cached.
 
 ## Email Preview Format
 
