@@ -6,7 +6,8 @@
 
 - `SKILL.md`：主工作流说明
 - `agents/openai.yaml`：相关 agent 配置
-- `editor_queue.py`：编辑队列辅助脚本
+- `scripts/editor_queue.py`：编辑队列辅助脚本
+- `scripts/send_qq_mail_submission.py`：QQ Mail 投稿发送辅助脚本
 
 ## 用途
 

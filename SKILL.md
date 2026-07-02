@@ -1,6 +1,6 @@
 ---
 name: novel-submission-loop
-description: "Use when the user wants to run the fixed Qimao editor novel submission loop: use the fixed editor preference library, take the next editor from the queue, decide the submission type from that editor's preferences, search male-channel candidate books only on Qidian Chinese Network and female-channel candidate books only on Fanqie Novel, select an excellent but non-mega-hit target book, read its first five chapters, generate detailed chapter outlines, write first five chapters, create title/introduction/character names/chapter names, generate a Word document, prepare an email preview, send through the local qq-mail@personal plugin MCP server helper after explicit confirmation, record the submission, and move to the next editor."
+description: "Use when the user wants to run the fixed Qimao editor novel submission loop: use the fixed editor preference library, take the next editor from the queue, decide the submission type from that editor's preferences, search male-channel candidate books only on Qidian Chinese Network and female-channel candidate books only on Fanqie Novel, select an excellent but non-mega-hit target book, read its first five chapters, generate detailed chapter outlines, write first five chapters, create title/introduction/character names/chapter names, generate a Word document, prepare an email preview, send through the local qq-mail@personal plugin MCP server helper after local validation without waiting for a separate user confirmation, record the submission, and move to the next editor."
 ---
 
 # Novel Submission Loop
@@ -20,7 +20,7 @@ Follow the user's locked workflow exactly. Do not add, remove, or reorder top-le
 9. Generate or rewrite the book title, synopsis, character names, and chapter names.
 10. Generate a Word document.
 11. Prepare an email preview.
-12. Send only after the user explicitly confirms.
+12. Send automatically after local validation succeeds.
 13. Record the submission.
 14. Move automatically to the next editor.
 
@@ -37,9 +37,11 @@ Use this helper when possible:
 
 ```bash
 python3 .agents/skills/novel-submission-loop/scripts/editor_queue.py next
-python3 .agents/skills/novel-submission-loop/scripts/editor_queue.py advance --project "<project_slug>" --title "<book_title>" --docx "outputs/<project_slug>/<book_title>.docx" --status sent
+python3 .agents/skills/novel-submission-loop/scripts/editor_queue.py advance --project "<project_slug>" --title "<book_title>" --docx "outputs/<project_slug>/<book_title>.docx" --status sent --submission-type "<submission_type>" --target-book "<target_book>"
 python3 .agents/skills/novel-submission-loop/scripts/send_qq_mail_submission.py --preview "outputs/<project_slug>/07_mail_preview.md" --confirm 确认发送
 ```
+
+The `--confirm 确认发送` argument is the helper script's required local safety token. It is not a requirement to ask the user for another confirmation during this workflow.
 
 ## Per-Submission Artifacts
 
@@ -71,7 +73,8 @@ outputs/<project_slug>/
 - Use the document workflow available in the current Codex session for `.docx` creation and render/QA when available.
 - Prepare the email preview before any send attempt. Include recipient, subject, body, and attachment path.
 - Send email only through `scripts/send_qq_mail_submission.py`, which loads the local `qq-mail@personal` plugin MCP server and calls its `send_email` handler.
-- Never send the email until the user explicitly confirms the exact preview.
+- Do not stop to ask for a separate send confirmation after the manuscript, Word document, and email preview pass validation. In this workflow, the user's request to run the submission loop authorizes sending the prepared submission.
+- Before sending, check `outputs/submission_log.jsonl` and `data/editors/editor_cursor.json` to avoid duplicate sends for the same editor/project/title. If a matching `status: sent` record already exists, do not send again; report the existing sent record and continue from the current cursor.
 - Only after successful send, append the submission log and advance the cursor.
 - Do not wait for a `qq_mail` tool to appear in the current Codex tool list; this workflow normally sends by loading the installed local plugin server directly.
 - If `scripts/send_qq_mail_submission.py` cannot find the local `qq-mail@personal` plugin server, cannot load credentials, or cannot attach the Word file, leave status as `prepared` and do not advance the cursor unless the user instructs otherwise.
@@ -135,10 +138,11 @@ Apply these rules to the email preview and final send:
 - The email body must contain only the novel title and the novel synopsis.
 - Do not include greetings, editor names, self-introduction, submission notes, attachment explanations, contact details, thanks, signatures, workflow notes, source-book notes, or AI/model/tool references in the email body.
 - The email preview may show recipient, subject, and attachment path as preview metadata, but those fields must not be repeated inside the email body.
+- The email preview is an internal validation artifact, not a user approval checkpoint.
 
 ## QQ Mail Send Path
 
-Use this deterministic send path when the user has confirmed with `确认发送`:
+Use this deterministic send path after the manuscript, Word document, and `07_mail_preview.md` pass validation:
 
 1. Verify the preview and attachment exist.
 2. Run a dry parse first:
@@ -147,14 +151,17 @@ Use this deterministic send path when the user has confirmed with `确认发送`
 python3 .agents/skills/novel-submission-loop/scripts/send_qq_mail_submission.py --preview "outputs/<project_slug>/07_mail_preview.md" --dry-run
 ```
 
-3. Send through the installed local `qq-mail@personal` plugin MCP server:
+3. If the dry-run succeeds and a matching sent log entry does not already exist, send through the installed local `qq-mail@personal` plugin MCP server. In the Codex sandbox used for this repo, QQ Mail SMTP commonly fails DNS/socket resolution without network escalation, so for the actual send request escalated network permission directly instead of first running a known-failing sandboxed send:
 
 ```bash
 python3 .agents/skills/novel-submission-loop/scripts/send_qq_mail_submission.py --preview "outputs/<project_slug>/07_mail_preview.md" --confirm 确认发送
 ```
 
-4. If the first send attempt fails with DNS, socket, or network sandbox errors, rerun the same command with escalated network permission. Do not switch mail providers.
-5. Only when the helper returns `sent: true`, run `editor_queue.py advance ... --status sent`.
+The `--confirm 确认发送` value above is a required CLI argument for the helper, not a separate user approval step.
+
+4. If an escalated send is rejected by policy or unavailable, leave status as `prepared`, do not advance the cursor, and report the blocker. Do not switch mail providers.
+5. Only when the helper returns `sent: true`, run `editor_queue.py advance ... --status sent --submission-type "<submission_type>" --target-book "<target_book>"`.
+6. `editor_queue.py advance` rejects `--status sent` if either `--submission-type` or `--target-book` is empty. If this happens, read the actual values from `01_type_decision.md` and `03_target_book.md`, then rerun `advance` with both values.
 
 The helper reads `QQ_MAIL_ENV_FILE` from the environment, defaulting to `qq-mail-mcp/.env` in the repo. It uses the installed personal plugin cache path for `qq-mail@personal`; if the plugin path is missing, stop and report that the local QQ Mail plugin server is not installed or not cached.
 
@@ -174,14 +181,11 @@ Write `07_mail_preview.md` like this:
 小说名：
 
 小说简介：
-
-发送前确认口令：
-确认发送
 ```
 
 ## Submission Log
 
-When the user confirms and the email is sent, append one JSON object per line to `outputs/submission_log.jsonl` with:
+When the email is sent, append one JSON object per line to `outputs/submission_log.jsonl` with:
 
 - `timestamp`
 - `platform`

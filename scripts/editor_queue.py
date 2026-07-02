@@ -33,8 +33,19 @@ def load_state():
     return editors, cursor, items, index
 
 
-def cmd_next(_args):
+def find_index(items, start_index, channel=None):
+    if not channel:
+        return start_index
+    for offset in range(len(items)):
+        index = (start_index + offset) % len(items)
+        if items[index].get("channel") == channel:
+            return index
+    raise SystemExit(f"No editor found for channel: {channel}")
+
+
+def cmd_next(args):
     editors, cursor, items, index = load_state()
+    index = find_index(items, index, args.channel)
     editor = items[index]
     result = {
         "platform": editors.get("platform"),
@@ -49,15 +60,20 @@ def cmd_next(_args):
 
 def cmd_advance(args):
     editors, cursor, items, index = load_state()
+    index = find_index(items, index, args.channel)
     editor = items[index]
     now = datetime.now(timezone.utc).astimezone().isoformat()
+    submission_type = (args.submission_type or "").strip()
+    target_book = (args.target_book or "").strip()
+    if args.status == "sent" and (not submission_type or not target_book):
+        raise SystemExit("--submission-type and --target-book are required when --status sent.")
     record = {
         "timestamp": now,
         "platform": editors.get("platform"),
         "editor": editor["name"],
         "email": editor["email"],
-        "submission_type": args.submission_type or "",
-        "target_book": args.target_book or "",
+        "submission_type": submission_type,
+        "target_book": target_book,
         "title": args.title,
         "project": args.project,
         "docx": args.docx,
@@ -79,9 +95,11 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
 
     next_parser = sub.add_parser("next", help="Print the current editor without advancing the queue.")
+    next_parser.add_argument("--channel", default="", help="Optionally skip to the next editor in this channel.")
     next_parser.set_defaults(func=cmd_next)
 
     advance_parser = sub.add_parser("advance", help="Append a submission log entry and advance the queue.")
+    advance_parser.add_argument("--channel", default="", help="Optionally advance the next editor in this channel.")
     advance_parser.add_argument("--project", required=True)
     advance_parser.add_argument("--title", required=True)
     advance_parser.add_argument("--docx", required=True)
